@@ -1,27 +1,38 @@
 use websocket::OwnedMessage;
 use std::sync::mpsc;
 use std::thread;
-use eetf::{Term};
-use inflate::inflate_bytes_zlib;
 
-use crate::discors::gatewaymessage::GatewayMessage;
+use crate::gatewaymessage::{GatewayMessage,GatewayMessageDecodeError};
 
 pub struct WebSocketShard {
   pub handle: thread::JoinHandle<Option<websocket::CloseData>>,
   sender: mpsc::Sender<GatewayMessage>,
+  id: u32
 }
 
 impl WebSocketShard {
-  pub fn new(url: String) -> WebSocketShard {
+  pub fn new(id: u32, url: String) -> WebSocketShard {
     let (outer_sender, inner_receiver) = mpsc::channel::<GatewayMessage>();
     WebSocketShard {
       handle: connect(url, inner_receiver),
       sender: outer_sender,
+      id
     }
+  }
+  pub fn wait(self) -> Result<Option<websocket::CloseData>, Box<(dyn std::any::Any + Send + 'static)>> {
+    self.handle.join()
   }
   pub fn send(&self, message: GatewayMessage) -> Result<(), mpsc::SendError<GatewayMessage>> {
     self.sender.send(message)
   }
+}
+
+fn add_query_params(url: &str) -> String {  
+  let mut url = url::Url::parse(url).unwrap();
+  url.query_pairs_mut().append_pair("q", "9");
+  url.query_pairs_mut().append_pair("encoding", "etf");
+  url.query_pairs_mut().append_pair("compress", "zlib-stream");
+  url.as_str().to_string()
 }
 
 fn connect(
@@ -29,11 +40,7 @@ fn connect(
   receiver: mpsc::Receiver<GatewayMessage>,
 ) -> thread::JoinHandle<Option<websocket::CloseData>> {
   thread::spawn(move || {
-    let mut url = url::Url::parse(url_str.as_str()).unwrap();
-    url.query_pairs_mut().append_pair("q", "9");
-    url.query_pairs_mut().append_pair("encoding", "etf");
-    url.query_pairs_mut().append_pair("compress", "zlib-stream");
-    let mut client = websocket::ClientBuilder::new(url.as_str()).unwrap().connect_secure(None).unwrap();
+    let mut client = websocket::ClientBuilder::new(&add_query_params(&url_str)).unwrap().connect_secure(None).unwrap();
     let mut cache = Vec::<u8>::new();
     loop {
       while let Ok(sending_message) = receiver.try_recv() {
@@ -48,13 +55,21 @@ fn connect(
         OwnedMessage::Binary(data) => {
           cache.extend(&data);
           if (data.len()) < 4 || (data[(data.len() - 4)..] != [0x00, 0x00, 0xff, 0xff]) { continue }
-          let maybe_decompressed = inflate_bytes_zlib(&cache);
+          let maybe_message = GatewayMessage::from_zlib(&cache);
           cache.clear();
-          if let Err(_) = maybe_decompressed { continue }
-          let maybe_decoded = Term::decode(&maybe_decompressed.unwrap()[..]);
-          if let Err(_) = maybe_decoded { continue }
-          let message = GatewayMessage::from_term(maybe_decoded.unwrap());
-          println!("{}", message);
+          match maybe_message {
+            Err(e) => {
+              println!("Error on decoding message: {:?}", match e {
+                GatewayMessageDecodeError::DecommpressError(e) => e,
+                GatewayMessageDecodeError::DecodeError(e) => format!("{}", e),
+                GatewayMessageDecodeError::ParseError(e) => e.to_string()
+              });
+              continue;
+            },
+            Ok(message) => {
+              println!("{:?}", message);
+            }
+          }
         },
         OwnedMessage::Close(data) => {
           return data; 
