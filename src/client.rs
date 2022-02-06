@@ -1,39 +1,43 @@
 use crate::rest;
-use crate::websocket::WebSocketShard;
-use std::collections::HashMap;
-use surf::http::convert::{Deserialize, Serialize};
+use crate::websocket::WebsocketManager;
 
 pub struct Client {
-  shards: HashMap<u32, WebSocketShard>,
+  pub shards: WebsocketManager,
   pub token: String
 }
 
-#[derive(Serialize, Deserialize)]
-struct GatewayInformation {
-  pub url: String,
-  pub shards: i32,
+#[derive(Debug)]
+pub enum ClientConnectError {
+  ReqwestError(reqwest::Error),
+  InformationError(&'static str),
+  None
 }
 
 impl Client {
   pub fn new(token: String) -> Client {
     Client {
-      shards: HashMap::new(),
-      token: token
+      shards: WebsocketManager::new(),
+      token
     }
   }
-  pub async fn connect(&mut self) -> Result<(), surf::Error> {
-    let mut resp = rest::request(&self, rest::Method::GET, "gateway/bot", |_| ()).await.unwrap();
-    let info = resp.body_json::<GatewayInformation>().await.unwrap();
-    for i in 0..info.shards {
-      self.shards.insert(i as u32, WebSocketShard::new(i as u32, info.url.clone()));
-    }
-    Ok(())
+  pub fn api(&self) -> rest::Router {
+    rest::Router::new(&self)
   }
-  pub fn wait_for_shards(&mut self) -> Vec<Result<Option<websocket::CloseData>, Box<dyn std::any::Any + Send>>> {
-    let mut results = Vec::new();
-    for i in 0..self.shards.len() {
-      results.push(self.shards.remove(&(i as u32)).unwrap().wait());
-    }
-    results
+  pub async fn connect(&mut self) -> ClientConnectError {
+    let info = match self.api()["gateway"]["bot"].get().send().await {
+      rest::SendResult::ReqwestError(e) => return ClientConnectError::ReqwestError(e),
+      rest::SendResult::Buffer(_) => return ClientConnectError::InformationError("Response is not JSON"),
+      rest::SendResult::JSON(v) => v,
+    };
+    let shards = match info["shards"].as_i64() {
+      None => return ClientConnectError::InformationError("Information missing: shrads count"),
+      Some(v) => v as u64
+    };
+    let url = match info["url"].as_str() {
+      None => return ClientConnectError::InformationError("Information missing: gateway url"),
+      Some(v) => v
+    };
+    for _ in 0..shards { self.shards.add_shard(url) }
+    ClientConnectError::None
   }
 }

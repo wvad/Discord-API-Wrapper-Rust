@@ -1,5 +1,5 @@
-use eetf::{Term};
-use inflate::inflate_bytes_zlib;
+use eetf::Term;
+use inflate::InflateStream;
 
 fn term_to_string(d: &Term, initial_indent: u32, space: u32) -> String {
   match d {
@@ -63,12 +63,14 @@ fn term_to_string(d: &Term, initial_indent: u32, space: u32) -> String {
 }
 
 pub struct GatewayMessage {
-  _op: u8,
-  _data: Option<Term>,
-  _sequence: Option<i32>,
-  _title: Option<String>
+  pub shard_id: u64,
+  pub op: u8,
+  pub data: Option<Term>,
+  pub sequence: Option<i32>,
+  pub title: Option<String>
 }
 
+#[derive(Debug)]
 pub enum GatewayMessageDecodeError {
   DecommpressError(String),
   DecodeError(eetf::DecodeError),
@@ -77,42 +79,62 @@ pub enum GatewayMessageDecodeError {
 
 impl GatewayMessage {
   pub fn new(
+    shard_id: u64,
     op: u8,
     data: Term
   ) -> GatewayMessage {
     GatewayMessage {
-      _op: op,
-      _data: Some(data),
-      _sequence: None,
-      _title: None
+      shard_id,
+      op,
+      data: Some(data),
+      sequence: None,
+      title: None
     }
   }
-  pub fn from_zlib(raw: &[u8]) -> Result<GatewayMessage, GatewayMessageDecodeError> {
-    let maybe_decompressed = inflate_bytes_zlib(&raw);
-    if let Err(e) = maybe_decompressed { return Err(GatewayMessageDecodeError::DecommpressError(e)) }
-    let maybe_decoded = Term::decode(&maybe_decompressed.unwrap()[..]);
-    if let Err(e) = maybe_decoded { return Err(GatewayMessageDecodeError::DecodeError(e)) }
-    let maybe_parsed = parse_websocket_message(maybe_decoded.unwrap());
-    if let Err(e) = maybe_parsed { return Err(GatewayMessageDecodeError::ParseError(e)) }
-    Ok(maybe_parsed.unwrap())
+  pub fn from_zlib(shard_id: u64, inflate: &mut InflateStream, raw: &[u8]) -> Result<GatewayMessage, GatewayMessageDecodeError> {
+    let decompressed = {
+      let mut decoded = Vec::<u8>::new();
+      let mut n = 0;
+      loop {
+        let (num_bytes_read, bytes) = match inflate.update(&raw[n..]) {
+          Err(e) => {
+            return Err(GatewayMessageDecodeError::DecommpressError(e));
+          },
+          Ok(r) => r
+        };
+        if bytes.is_empty() { break; }
+        n += num_bytes_read;
+        decoded.extend_from_slice(bytes);
+      }
+      decoded
+    };
+    let decoded = match Term::decode(&decompressed[..]) {
+      Err(e) => return Err(GatewayMessageDecodeError::DecodeError(e)),
+      Ok(d) => d
+    };
+    match parse_websocket_message(shard_id, decoded) {
+      Err(e) => Err(GatewayMessageDecodeError::ParseError(e)),
+      Ok(d) => Ok(d)
+    }
   }
   pub fn as_buffer(&self) -> Result<Vec<u8>, eetf::EncodeError> {
     let mut buf = Vec::new();
-    gateway_message_to_term(self._op, &self._data).encode(&mut buf).map(|_| buf)
+    gateway_message_to_term(self.op, &self.data).encode(&mut buf).map(|_| buf)
   }
   pub fn to_string(&self) -> String {
     format!(
-      "GatewayMessage {{\n  op: {},\n  d: {},\n  s: {},\n  t: {}\n}}", 
-      self._op,
-      match &self._data {
+      "GatewayMessage (shard_id: {}) {{\n  op: {},\n  d: {},\n  s: {},\n  t: {}\n}}",
+      self.shard_id,
+      self.op,
+      match &self.data {
         Some(data) => term_to_string(&data, 2, 2),
         None => "null".to_string()
       },
-      match self._sequence {
+      match self.sequence {
         Some(seq) => format!("{}", seq),
         None => "null".to_string()
       },
-      match &self._title {
+      match &self.title {
         Some(t) => format!("{}", t),
         None => "null".to_string()
       }
@@ -120,13 +142,10 @@ impl GatewayMessage {
   }
 }
 
-fn parse_websocket_message(raw: Term) -> Result<GatewayMessage, &'static str> {
+fn parse_websocket_message(shard_id: u64, raw: Term) -> Result<GatewayMessage, &'static str> {
   match raw {
     Term::Map(d) => parse_eetf_map(d.entries).map(|(op, data, sequence, title)| GatewayMessage {
-      _op: op,
-      _data: data,
-      _sequence: sequence,
-      _title: title
+      shard_id, op, data, sequence, title
     }),
     _ => Err("Invalid format: Expected map")
   }
