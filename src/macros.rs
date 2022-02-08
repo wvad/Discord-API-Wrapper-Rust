@@ -62,7 +62,7 @@ macro_rules! etf_internal {
 
     // Insert the current entry followed by trailing comma.
     (@object $object:ident [$($key:tt)+] ($value:expr) , $($rest:tt)*) => {
-        let _ = $object.push(($crate::convert::to_term(&$($key)+), $value));
+        let _ = $object.push(($crate::ws::term_convert::to_term(&$($key)+), $value));
         etf_internal!(@object $object () ($($rest)*) ($($rest)*));
     };
 
@@ -73,7 +73,7 @@ macro_rules! etf_internal {
 
     // Insert the last entry without trailing comma.
     (@object $object:ident [$($key:tt)+] ($value:expr)) => {
-        let _ = $object.push(($crate::convert::to_term(&$($key)+), $value));
+        let _ = $object.push(($crate::ws::term_convert::to_term(&$($key)+), $value));
     };
 
     // Next value is `null`.
@@ -180,7 +180,7 @@ macro_rules! etf_internal {
     };
     
     ($other:expr) => {
-      $crate::convert::to_term(&$other)
+      $crate::ws::term_convert::to_term(&$other)
     };
 }
 

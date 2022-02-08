@@ -1,8 +1,10 @@
-pub mod client;
-pub mod gatewaymessage;
 pub mod rest;
-pub mod websocket;
-pub mod convert;
+
+mod client;
+pub use client::*;
+
+mod structures;
+pub use structures::*;
 
 #[macro_use]
 pub mod macros;
