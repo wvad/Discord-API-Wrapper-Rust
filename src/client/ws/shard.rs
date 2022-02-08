@@ -1,7 +1,7 @@
 use websocket::OwnedMessage;
 use std::thread;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
-use crate::{GatewayMessage, client::ws::{WebsocketManagerData, Inflate, OptionalResult}};
+use crate::{ReceivedGatewayMessage, SendGatewayMessage, client::ws::{WebsocketManagerData, Inflate, OptionalResult}};
 use websocket::sync::{stream::{TcpStream, TlsStream}, client::Client};
 
 type SharedPtr<T> = Arc<Mutex<T>>;
@@ -67,7 +67,7 @@ impl WebSocketShard {
               },
               OptionalResult::None => continue
             };
-            let maybe_message = GatewayMessage::from_term(shard_id, term);
+            let maybe_message = ReceivedGatewayMessage::from_term(shard_id, &term);
             match maybe_message {
               Err(err) => {
                 println!("[ERROR] {:?}", err);
@@ -93,7 +93,7 @@ impl WebSocketShard {
     }
     self._handle.take().unwrap().join()
   }
-  pub fn send(&self, message: GatewayMessage) {
+  pub fn send(&self, message: SendGatewayMessage) {
     let connection = match &self.connection {
       Some(connection) => connection,
       None => {

@@ -1,14 +1,14 @@
 use std::sync::{mpsc::{Sender, Receiver, channel}, Arc, Mutex, atomic::Ordering};
 use std::thread;
 use crate::{client::ws::{WebSocketShard, InflateError}, ClientData};
-use crate::GatewayMessage;
+use crate::{ReceivedGatewayMessage, SendGatewayMessage};
 use crate::rest::{APIRouter, SendResult};
 
 type SharedPtr<T> = Arc<Mutex<T>>;
 
 pub struct WebsocketManagerData {
   pub gateway: String,
-  pub message_emitter: Sender<GatewayMessage>,
+  pub message_emitter: Sender<ReceivedGatewayMessage>,
   pub error_emitter: Sender<InflateError>
 }
 
@@ -22,14 +22,14 @@ pub struct WebsocketManager {
   _data: SharedPtr<WebsocketManagerData>,
   _client_data: SharedPtr<ClientData>,
   _shards: std::collections::HashMap<u64, WebSocketShard>,
-  _message_outer: Receiver<GatewayMessage>,
+  _message_outer: Receiver<ReceivedGatewayMessage>,
   _error_outer: Receiver<InflateError>
 }
 
 impl WebsocketManager {
   pub fn new(client_data: &SharedPtr<ClientData>) -> WebsocketManager {
-    let (message_inner, message_outer) = channel::<GatewayMessage>();
-    let (error_inner, error_outer) = channel::<InflateError>();
+    let (message_inner, message_outer) = channel();
+    let (error_inner, error_outer) = channel();
     WebsocketManager {
       _data: SharedPtr::new(Mutex::new(WebsocketManagerData {
         gateway: String::new(),
@@ -73,7 +73,7 @@ impl WebsocketManager {
     };
     for _ in 0..shards { self.add_shard(); }
   }
-  pub fn get_messages(&self) -> Vec<GatewayMessage> {
+  pub fn get_messages(&self) -> Vec<ReceivedGatewayMessage> {
     let mut messages = Vec::new();
     loop {
       match self._message_outer.try_recv() {
@@ -106,7 +106,7 @@ impl WebsocketManager {
     }
     true
   }
-  pub fn send(&self, message: GatewayMessage) -> WSSendResult {
+  pub fn send(&self, message: SendGatewayMessage) -> WSSendResult {
     if let Some(shard) = self._shards.get(&message.shard_id) {
       shard.send(message);
       WSSendResult::Ok

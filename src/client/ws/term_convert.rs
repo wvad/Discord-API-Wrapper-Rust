@@ -8,6 +8,12 @@ pub fn to_term<T>(v: &T) -> Term where T: TermConvertable {
   TermConvertable::to_term(v)
 }
 
+impl TermConvertable for Term {
+  fn to_term(&self) -> Term {
+    self.clone()
+  }
+}
+
 impl<'a> TermConvertable for &'a str {
   fn to_term(&self) -> Term {
     Term::Binary(eetf::Binary{ bytes: self.as_bytes().to_vec() })
@@ -29,6 +35,12 @@ impl<'a> TermConvertable for &'a[u8] {
 impl TermConvertable for Vec<u8> {
   fn to_term(&self) -> Term {
     Term::Binary(eetf::Binary{ bytes: self.clone() })
+  }
+}
+
+impl TermConvertable for u8 {
+  fn to_term(&self) -> Term {
+    Term::FixInteger(eetf::FixInteger{ value: *self as i32 })
   }
 }
 

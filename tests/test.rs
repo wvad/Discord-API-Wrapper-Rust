@@ -1,6 +1,4 @@
-use discors::Client;
-use discors::GatewayMessage;
-use discors::etf;
+use discors::{Client, SendGatewayMessage, SendOP, etf};
 
 #[tokio::test]
 async fn async_test() {
@@ -12,17 +10,20 @@ async fn async_test() {
       println!("[INFO] Received Message: {:?}", message);
       match message.op {
         10 => {
-          let message = GatewayMessage::new(message.shard_id, 2, etf!({
-            "compress": true,
-            "token": token,
-            "intents": 32767,
-            "properties": {
-              "$os": "windows",
-              "$browser": "discors",
-              "$device": "discors"
-            }
-          }));
-          client.shards.send(message);
+          client.shards.send(SendGatewayMessage {
+            shard_id: message.shard_id,
+            op: SendOP::Identify,
+            data: etf!({
+              "compress": true,
+              "token": token,
+              "intents": 32767,
+              "properties": {
+                "$os": "windows",
+                "$browser": "discors",
+                "$device": "discors"
+              }
+            })
+          });
         },
         _ => ()
       }
